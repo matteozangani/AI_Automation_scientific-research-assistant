@@ -6,7 +6,8 @@ Coordinates research tasks using MCP tools
 import asyncio
 import json
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import logging
 
 # Configure logging
@@ -14,13 +15,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+dataclass
 class ResearchQuery:
     """Represents a research query"""
     query: str
     sources: List[str]
     max_results: int = 10
-    filters: Optional[Dict[str, Any]] = None
+    filters: Optional[Dict[str, Any]] = field(default_factory=lambda: None)
 
 
 class ResearchOrchestrator:
@@ -46,7 +47,28 @@ class ResearchOrchestrator:
             mcp_client: MCP client instance (if None, will use direct tool calls)
         """
         self.mcp_client = mcp_client
+        self._tool_map = None  # Lazy initialization
         logger.info("Research Orchestrator initialized")
+    
+    def _get_tool_map(self):
+        """Lazy initialization of tools to avoid recreating instances"""
+        if self._tool_map is None:
+            from mcp_server.tools.arxiv_tool import ArxivTool
+            from mcp_server.tools.pubmed_tool import PubmedTool
+            from mcp_server.tools.semantic_scholar_tool import SemanticScholarTool
+            from mcp_server.tools.crossref_tool import CrossrefTool
+            from mcp_server.tools.ieee_tool import IEEETool
+            from mcp_server.tools.google_scholar_tool import GoogleScholarTool
+            
+            self._tool_map = {
+                "arxiv": ArxivTool(),
+                "pubmed": PubmedTool(),
+                "semantic_scholar": SemanticScholarTool(),
+                "crossref": CrossrefTool(),
+                "ieee": IEEETool(),
+                "google_scholar": GoogleScholarTool()
+            }
+        return self._tool_map
     
     async def search(self, query: ResearchQuery) -> Dict[str, Any]:
         """
@@ -58,65 +80,65 @@ class ResearchOrchestrator:
         Returns:
             Dict containing aggregated results from all sources
         """
+        # Validate query input
+        if not query.query or not query.query.strip():
+            logger.error("Empty query provided")
+            return {"error": "Query cannot be empty", "results": {}}
+        
+        if len(query.query) > 500:
+            logger.warning("Query too long, truncating to 500 characters")
+            query.query = query.query[:500]
+        
+        if query.max_results <= 0 or query.max_results > 100:
+            logger.warning(f"Invalid max_results {query.max_results}, setting to 10")
+            query.max_results = 10
+        
         logger.info(f"Starting search for: '{query.query}'")
         logger.info(f"Sources: {query.sources}")
         logger.info(f"Max results per source: {query.max_results}")
         
-        # Validate sources
+        # Validate sources without mutating input
         invalid_sources = [s for s in query.sources if s not in self.AVAILABLE_SOURCES]
+        valid_sources = [s for s in query.sources if s in self.AVAILABLE_SOURCES]
+        
         if invalid_sources:
             logger.warning(f"Invalid sources will be skipped: {invalid_sources}")
-            query.sources = [s for s in query.sources if s in self.AVAILABLE_SOURCES]
         
-        if not query.sources:
+        if not valid_sources:
             return {"error": "No valid sources specified", "results": {}}
         
         # Execute searches
         if self.mcp_client:
-            results = await self._search_via_mcp(query)
+            results = await self._search_via_mcp(query, valid_sources)
         else:
-            results = await self._search_direct(query)
+            results = await self._search_direct(query, valid_sources)
         
         logger.info(f"Search completed. Found results from {len(results)} sources")
         
         return {
             "query": query.query,
-            "sources_searched": query.sources,
+            "sources_searched": valid_sources,
             "total_sources": len(results),
             "results": results,
-            "timestamp": asyncio.get_event_loop().time()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
-    async def _search_via_mcp(self, query: ResearchQuery) -> Dict[str, Any]:
+    async def _search_via_mcp(self, query: ResearchQuery, valid_sources: List[str]) -> Dict[str, Any]:
         """Search using MCP client"""
         logger.info("Executing search via MCP server...")
         
         # This will be implemented when MCP client is connected
         # For now, use direct search
-        return await self._search_direct(query)
+        return await self._search_direct(query, valid_sources)
     
-    async def _search_direct(self, query: ResearchQuery) -> Dict[str, Any]:
+    async def _search_direct(self, query: ResearchQuery, valid_sources: List[str]) -> Dict[str, Any]:
         """Search using direct tool imports"""
-        from mcp_server.tools.arxiv_tool import ArxivTool
-        from mcp_server.tools.pubmed_tool import PubmedTool
-        from mcp_server.tools.semantic_scholar_tool import SemanticScholarTool
-        from mcp_server.tools.crossref_tool import CrossrefTool
-        from mcp_server.tools.ieee_tool import IEEETool
-        from mcp_server.tools.google_scholar_tool import GoogleScholarTool
-        
-        tool_map = {
-            "arxiv": ArxivTool(),
-            "pubmed": PubmedTool(),
-            "semantic_scholar": SemanticScholarTool(),
-            "crossref": CrossrefTool(),
-            "ieee": IEEETool(),
-            "google_scholar": GoogleScholarTool()
-        }
+        tool_map = self._get_tool_map()
         
         tasks = []
         source_names = []
         
-        for source in query.sources:
+        for source in valid_sources:
             if source in tool_map:
                 logger.info(f"  → Querying {source}...")
                 tool = tool_map[source]
@@ -124,8 +146,15 @@ class ResearchOrchestrator:
                 tasks.append(task)
                 source_names.append(source)
         
-        # Execute all searches in parallel
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        # Execute all searches in parallel with timeout
+        try:
+            results_list = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0  # 30 seconds timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error("Search timeout after 30 seconds")
+            return {"error": "Search timeout after 30 seconds", "results": {}}
         
         # Aggregate results
         results = {}
@@ -151,6 +180,10 @@ class ResearchOrchestrator:
         Returns:
             Dict with paper details
         """
+        if not paper_identifier or not paper_identifier.strip():
+            logger.error("Empty paper identifier provided")
+            return {"error": "Paper identifier cannot be empty", "paper": None}
+        
         logger.info(f"Summarizing paper: {paper_identifier}")
         
         if source == "auto":
@@ -198,6 +231,10 @@ class ResearchOrchestrator:
         Returns:
             Dict with related papers
         """
+        if not paper_title or not paper_title.strip():
+            logger.error("Empty paper title provided")
+            return {"error": "Paper title cannot be empty", "results": {}}
+        
         logger.info(f"Finding papers related to: {paper_title}")
         
         # Use Semantic Scholar for related papers (has best citation data)
@@ -219,6 +256,10 @@ class ResearchOrchestrator:
         Returns:
             Dict with comparison data
         """
+        if not paper_ids:
+            logger.error("Empty paper_ids list provided")
+            return {"error": "Paper IDs list cannot be empty", "papers": [], "comparison": {}}
+        
         logger.info(f"Comparing {len(paper_ids)} papers")
         
         papers = []
@@ -246,7 +287,7 @@ class ResearchOrchestrator:
         
         # Citation statistics
         citations = [p.get("citation_count", 0) or p.get("citations", 0) for p in papers]
-        if citations:
+        if citations and len(citations) > 0:
             comparison["citation_stats"] = {
                 "min": min(citations),
                 "max": max(citations),
