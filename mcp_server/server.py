@@ -1,10 +1,52 @@
-# Critical Bug Fixes and Improvements
+import logging
+import time
+import socket
 
-- Add timeout to `asyncio.gather` in `multi_source_search` to prevent indefinite blocking.
-- Add comprehensive input validation with `validate_and_sanitize_inputs` function.
-- Add proper logging throughout the application.
-- Improve error handling with specific exception types.
-- Fix index sync issue in `multi_source_search` by filtering valid sources first.
-- Add constants for `DEFAULT_MAX_RESULTS`, `MAX_ALLOWED_RESULTS`, `DEFAULT_TIMEOUT.`
-- Add validation for empty sources list in `multi_source_search`.
-- Add warnings for invalid sources in `multi_source_search` output.
+# Constants
+SERVER_ADDRESS = '127.0.0.1'
+SERVER_PORT = 65432
+TIMEOUT = 5
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def create_server_socket():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(TIMEOUT)  # Set timeout for socket operations
+    return sock
+
+def start_server():
+    server_socket = create_server_socket()
+    try:
+        server_socket.bind((SERVER_ADDRESS, SERVER_PORT))
+        server_socket.listen(5)
+        logging.info(f'Server listening on {SERVER_ADDRESS}:{SERVER_PORT}')
+
+        while True:
+            try:
+                connection, client_address = server_socket.accept()
+                handle_client(connection, client_address)
+            except socket.timeout:
+                logging.warning('Socket timed out')
+            except Exception as e:
+                logging.error(f'Error accepting connection: {e}')
+    finally:
+        server_socket.close()
+
+def handle_client(connection, client_address):
+    logging.info(f'Connection from: {client_address}')
+    try:
+        while True:
+            data = connection.recv(1024)
+            if not data:
+                break  # no data, connection closed
+            logging.info(f'Received data: {data}')
+            connection.sendall(data)  # Echo back the received data
+    except Exception as e:
+        logging.error(f'Error handling client {client_address}: {e}')
+    finally:
+        connection.close()
+        logging.info(f'Connection closed for {client_address}')
+
+if __name__ == '__main__':
+    start_server()
