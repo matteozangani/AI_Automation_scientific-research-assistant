@@ -1,0 +1,32 @@
+# Core async HTTP
+aiohttp>=3.9.0
+
+# LangChain and Agent Framework
+langgraph>=0.0.20
+langchain>=0.1.0
+langchain-anthropic>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.0.20
+
+# Anthropic
+anthropic>=0.18.0
+
+# RAG Components - Vector Store
+chromadb>=0.4.22
+
+# RAG Components - Embeddings
+sentence-transformers>=2.2.2
+torch>=2.0.0
+transformers>=4.36.0
+
+# RAG Components - PDF Processing
+pypdf>=3.17.0
+pypdf2>=3.0.0
+
+# Alternative vector stores (optional)
+# faiss-cpu>=1.7.4
+# pinecone-client>=2.2.0
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.66.0
