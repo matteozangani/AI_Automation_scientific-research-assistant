@@ -1,0 +1,1 @@
+MCP Client for communication between MCP servers with WebSocket protocol support, including methods for connect, disconnect, call_tool, list_tools, get_tool_info, ping, and context manager support
