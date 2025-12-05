@@ -1,0 +1,12 @@
+websockets>=11.0
+python-docx>=1.1.0
+python-pptx>=0.6.21
+langchain-anthropic>=0.1.10
+langchain-core>=0.1.18
+mermaid-js>=10.4.0
+pytest>=7.0.0
+fastapi>=0.110.0
+uvicorn>=0.27.1
+
+# Optional for LaTeX compilation and image rendering
+pyppeteer>=1.0.2
